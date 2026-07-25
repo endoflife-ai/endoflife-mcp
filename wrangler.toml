@@ -1,0 +1,15 @@
+name = "endoflife-mcp"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+# NOTE: the custom domain route lives under [env.production] below so that a
+# plain `wrangler deploy` goes ONLY to the workers.dev test URL (no DNS needed).
+# Add the `mcp` DNS record (see README), then `wrangler deploy --env production`.
+
+[env.production]
+name = "endoflife-mcp-prod"
+route = { pattern = "mcp.endoflife.ai/*", zone_name = "endoflife.ai" }
+
+# No KV / secrets needed for Phase 1 — the Worker calls the public
+# api.endoflife.ai endpoints and forwards any X-API-Key the caller sends.

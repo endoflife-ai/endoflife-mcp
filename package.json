@@ -1,0 +1,15 @@
+{
+  "name": "endoflife-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MCP server for endoflife.ai — software lifecycle intelligence for AI agents.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:prod": "wrangler deploy --env production",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.80.0"
+  }
+}
