@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Daily production smoke test. On 2026-07-29 every tool returned an error in
+  # production for an unknown period while the server still looked healthy —
+  # this job is here so that never goes unnoticed again.
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax
+        run: |
+          node --check src/index.js
+          node --check stdio.js
+
+      - name: Manifests are valid JSON
+        run: |
+          node -e "
+          const fs = require('fs');
+          for (const f of ['server.json', 'glama.json', 'package.json']) {
+            JSON.parse(fs.readFileSync(f, 'utf8'));
+            console.log(f + ' ok');
+          }"
+
+      - name: Version agrees across manifests and source
+        run: |
+          node -e "
+          const fs = require('fs');
+          const server = JSON.parse(fs.readFileSync('server.json', 'utf8')).version;
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+          const src = fs.readFileSync('src/index.js', 'utf8')
+            .match(/SERVER_INFO\s*=\s*\{[\s\S]*?version:\s*'([^']+)'/)[1];
+          const seen = new Set([server, pkg, src]);
+          console.log({ server, pkg, src });
+          if (seen.size !== 1) {
+            console.error('version mismatch — server.json, package.json and SERVER_INFO must agree');
+            process.exit(1);
+          }
+          console.log('versions agree: ' + server);"
+
+      - name: server.json repository points at a public path in this repo
+        run: |
+          node -e "
+          const repo = JSON.parse(require('fs').readFileSync('server.json', 'utf8')).repository;
+          console.log(repo);
+          if (!/endoflife-ai\/endoflife-mcp\$/.test(repo.url)) {
+            console.error('repository.url must point at this repo, not the site repo');
+            process.exit(1);
+          }
+          if ('subfolder' in repo) {
+            console.error('repository.subfolder does not exist in this repo — the server is at the root');
+            process.exit(1);
+          }
+          console.log('repository reference ok');"
+
+  smoke:
+    name: Live smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Deployed server answers real tool calls
+        run: node .github/scripts/smoke.mjs
