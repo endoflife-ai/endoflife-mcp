@@ -1,5 +1,7 @@
 # endoflife.ai — MCP Server
 
+[![Node.js EOL status](https://img.shields.io/endpoint?url=https%3A%2F%2Fendoflife.ai%2Fbadge%2Fnodejs.json)](https://endoflife.ai/nodejs) [![EOL data: endoflife.ai](https://img.shields.io/badge/EOL%20data-endoflife.ai-16a34a)](https://endoflife.ai)
+
 Exposes endoflife.ai's lifecycle intelligence to AI agents over the **Model Context
 Protocol** (MCP, Streamable HTTP transport). It's a thin, dependency-free Cloudflare
 Worker that wraps the existing `api.endoflife.ai/v1` endpoints — no data duplicated.
