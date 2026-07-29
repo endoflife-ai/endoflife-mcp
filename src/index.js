@@ -130,32 +130,44 @@ function authHeaders(request) {
   return h;
 }
 
-async function apiGet(path, request) {
-  const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders(request) });
+/**
+ * api.endoflife.ai is a Worker on the SAME zone as this one. A Worker subrequest
+ * to its own zone is not routed back through Workers — Cloudflare sends it to the
+ * origin, and this zone has no origin behind api.*, so every call failed. When the
+ * API service binding is present we call the API Worker directly through it; the
+ * plain fetch remains as a fallback for `wrangler dev` and unbound deploys.
+ */
+function apiFetch(url, init, env) {
+  const req = new Request(url, init);
+  return env && env.API && typeof env.API.fetch === 'function' ? env.API.fetch(req) : fetch(req);
+}
+
+async function apiGet(path, request, env) {
+  const res = await apiFetch(`${API_BASE}${path}`, { headers: authHeaders(request) }, env);
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
   return { ok: res.ok, status: res.status, data };
 }
 
-async function apiPost(path, body, request) {
-  const res = await fetch(`${API_BASE}${path}`, {
+async function apiPost(path, body, request, env) {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { ...authHeaders(request), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, env);
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
   return { ok: res.ok, status: res.status, data };
 }
 
 // ── Tool implementations ────────────────────────────────────────────────────
-async function runTool(name, args, request) {
+async function runTool(name, args, request, env) {
   args = args || {};
   switch (name) {
     case 'check_eol': {
       const p = slugify(args.product), v = encodeURIComponent(String(args.version || ''));
       if (!p || !v) return toolError('Both "product" and "version" are required.');
-      const r = await apiGet(`/v1/status/${p}/${v}`, request);
+      const r = await apiGet(`/v1/status/${p}/${v}`, request, env);
       if (!r.ok) return toolError(upstreamMsg(r, `No data for ${args.product} ${args.version}.`));
       return toolJson(r.data);
     }
@@ -165,7 +177,7 @@ async function runTool(name, args, request) {
       const path = args.version
         ? `/v1/score/${p}/${encodeURIComponent(String(args.version))}`
         : `/v1/score/${p}`;
-      const r = await apiGet(path, request);
+      const r = await apiGet(path, request, env);
       if (!r.ok) return toolError(upstreamMsg(r, `No score for ${args.product}${args.version ? ' ' + args.version : ''}.`));
       return toolJson(r.data);
     }
@@ -176,12 +188,12 @@ async function runTool(name, args, request) {
         slug: slugify(i.product),
         ...(i.version ? { version: String(i.version) } : {}),
       })).filter(i => i.slug);
-      const r = await apiPost('/v1/batch', { products }, request);
+      const r = await apiPost('/v1/batch', { products }, request, env);
       if (!r.ok) return toolError(upstreamMsg(r, 'Batch scan failed.'));
       return toolJson(r.data);
     }
     case 'list_products': {
-      const r = await apiGet('/v1/products', request);
+      const r = await apiGet('/v1/products', request, env);
       if (!r.ok) return toolError(upstreamMsg(r, 'Could not fetch product list.'));
       let products = Array.isArray(r.data.products) ? r.data.products : [];
       const q = (args.query || '').toLowerCase().trim();
@@ -198,7 +210,7 @@ async function runTool(name, args, request) {
     case 'get_product_lifecycle': {
       const p = slugify(args.product);
       if (!p) return toolError('"product" is required.');
-      const r = await apiGet(`/v1/product/${p}`, request);
+      const r = await apiGet(`/v1/product/${p}`, request, env);
       if (!r.ok) return toolError(upstreamMsg(r, `Product "${args.product}" not found.`));
       return toolJson(r.data);
     }
@@ -221,7 +233,7 @@ function toolError(msg) {
 }
 
 // ── MCP JSON-RPC dispatch ───────────────────────────────────────────────────
-async function handleRpc(msg, request) {
+async function handleRpc(msg, request, env) {
   const { id, method, params } = msg;
   const reply = (result) => ({ jsonrpc: '2.0', id, result });
   const fail = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -245,7 +257,7 @@ async function handleRpc(msg, request) {
       const args = (params && params.arguments) || {};
       if (!name) return fail(-32602, 'Missing tool name.');
       try {
-        const result = await runTool(name, args, request);
+        const result = await runTool(name, args, request, env);
         return reply(result);
       } catch (e) {
         return reply(toolError(`Tool execution failed: ${e && e.message ? e.message : String(e)}`));
@@ -307,7 +319,7 @@ Docs: https://endoflife.ai/mcp   ·   API: https://endoflife.ai/api
 
 // ── Worker entry ────────────────────────────────────────────────────────────
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
@@ -341,7 +353,7 @@ export default {
     for (const msg of messages) {
       // Notifications (no id) get no response body.
       if (msg && msg.id === undefined) continue;
-      responses.push(await handleRpc(msg, request));
+      responses.push(await handleRpc(msg, request, env));
     }
 
     if (responses.length === 0) {
