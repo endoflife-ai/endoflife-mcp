@@ -1,6 +1,6 @@
 {
   "name": "endoflife-mcp",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "description": "MCP server for endoflife.ai — software lifecycle intelligence for AI agents.",
   "scripts": {
