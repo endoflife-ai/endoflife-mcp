@@ -13,3 +13,14 @@ route = { pattern = "mcp.endoflife.ai/*", zone_name = "endoflife.ai" }
 
 # No KV / secrets needed for Phase 1 — the Worker calls the public
 # api.endoflife.ai endpoints and forwards any X-API-Key the caller sends.
+
+# api.endoflife.ai is a Worker on this same zone, so a normal fetch() to it is
+# sent to origin rather than back through Workers (and there is no origin) —
+# every tool call failed with an upstream error. Bind the API Worker directly.
+[[services]]
+binding = "API"
+service = "endoflife-api"
+
+[[env.production.services]]
+binding = "API"
+service = "endoflife-api"
