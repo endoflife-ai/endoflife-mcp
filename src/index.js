@@ -23,7 +23,9 @@ const DEFAULT_PROTOCOL = '2025-06-18';
 const SERVER_INFO = {
   name: 'endoflife.ai',
   title: 'endoflife.ai — Software Lifecycle Intelligence',
-  version: '1.0.0',
+  // Keep in step with server.json, package.json, and the published registry /
+  // Glama release versions — a mismatch here is what clients see in initialize.
+  version: '1.0.2',
 };
 
 // ── Tool definitions (advertised by tools/list) ────────────────────────────
