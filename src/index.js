@@ -89,7 +89,7 @@ const TOOLS = [
   {
     name: 'list_products',
     description:
-      'List or search the products endoflife.ai tracks (460+). Pass an optional "query" substring to find the ' +
+      'List or search the products endoflife.ai tracks (480+). Pass an optional "query" substring to find the ' +
       'canonical slug for a product before calling the other tools (e.g. "postgres" → "postgresql"). ' +
       'Returns matching product slugs.',
     inputSchema: {
@@ -279,14 +279,14 @@ function serverCard() {
     serverInfo: SERVER_INFO,
     description:
       'Software lifecycle intelligence for AI agents: end-of-life dates, support status, and the EOL Risk Score™ ' +
-      '(0–100, factoring EOL recency, attack surface, and CISA KEV exposure) for 460+ products and 8,000+ versions.',
+      '(0–100, factoring EOL recency, attack surface, and CISA KEV exposure) for 480+ products and 8,000+ versions.',
     transport: { type: 'streamable-http', endpoint: 'https://mcp.endoflife.ai' },
     capabilities: { tools: {} },
     tools: [
       { name: 'check_eol', description: 'Check whether a specific product version is end-of-life.' },
       { name: 'get_risk_score', description: 'Get the EOL Risk Score (0–100) for a product version, with the four-factor breakdown.' },
       { name: 'scan_stack', description: 'Audit a whole stack at once and score each component for EOL risk.' },
-      { name: 'list_products', description: 'Search the 460+ tracked products to resolve a name to its canonical slug.' },
+      { name: 'list_products', description: 'Search the 480+ tracked products to resolve a name to its canonical slug.' },
       { name: 'get_product_lifecycle', description: 'Get the full version history and EOL dates for one product.' },
     ],
     documentation: 'https://endoflife.ai/mcp',
