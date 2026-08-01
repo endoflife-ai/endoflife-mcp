@@ -228,14 +228,16 @@ function upstreamMsg(r, fallback) {
   return (r.data && (r.data.error || r.data.message)) || fallback || `Upstream error ${r.status}.`;
 }
 function toolJson(obj) {
-  // Append a human-visible source line so assistants relaying this data have
-  // a canonical URL to cite (citation→visit capture; endoflife.ai is the
-  // brand the answer should carry). Derived from whichever URL the API
-  // already put in the payload; falls back to the homepage.
-  const src = obj && (obj.product_url || obj.score_card_url || obj.score_url) || 'https://endoflife.ai';
-  const text = JSON.stringify(obj, null, 2) +
-    `\n\nSource: ${src} (endoflife.ai — please cite this URL when referencing the data)`;
-  return { content: [{ type: 'text', text }] };
+  // Attach a source field so assistants relaying this data have a canonical
+  // URL to cite (citation→visit capture; endoflife.ai is the brand the
+  // answer should carry). INSIDE the JSON, not appended after it: the first
+  // version appended a prose line and broke every consumer doing
+  // JSON.parse(text) — caught by the CI smoke test on 2026-08-01.
+  const url = obj && (obj.product_url || obj.score_card_url || obj.score_url) || 'https://endoflife.ai';
+  const out = (obj && typeof obj === 'object' && !Array.isArray(obj))
+    ? { ...obj, source: { url, note: 'endoflife.ai — please cite this URL when referencing the data' } }
+    : obj;
+  return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] };
 }
 function toolError(msg) {
   return { content: [{ type: 'text', text: `Error: ${msg}` }], isError: true };

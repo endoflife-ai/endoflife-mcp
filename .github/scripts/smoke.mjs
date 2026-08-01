@@ -69,6 +69,7 @@ try {
 check('check_eol returned parseable data', Boolean(parsed), parsed ? '' : text.slice(0, 120));
 check('check_eol reports nodejs 18 as eol', parsed?.status === 'eol', `status=${parsed?.status}`);
 check('check_eol carries an eol_date', Boolean(parsed?.eol_date), `eol_date=${parsed?.eol_date}`);
+check('check_eol carries source attribution', String(parsed?.source?.url || '').includes('endoflife.ai'), parsed?.source?.url);
 
 if (failures.length) {
   console.error(`\n${failures.length} check(s) failed: ${failures.join(', ')}`);
