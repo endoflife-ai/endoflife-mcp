@@ -13,7 +13,7 @@ Worker that wraps the existing `api.endoflife.ai/v1` endpoints — no data dupli
 | `check_eol` | Is product X version Y end-of-life? | `GET /v1/status/:slug/:version` |
 | `get_risk_score` | EOL Risk Score™ (0–100) + factor breakdown | `GET /v1/score/:slug[/:version]` |
 | `scan_stack` | Score a whole stack at once | `POST /v1/batch` |
-| `list_products` | Search the 488 tracked products → resolve slugs | `GET /v1/products` |
+| `list_products` | Search the 480+ tracked products → resolve slugs | `GET /v1/products` |
 | `get_product_lifecycle` | Full version history + dates for one product | `GET /v1/product/:slug` |
 
 ## Deploy
