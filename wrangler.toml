@@ -24,3 +24,15 @@ service = "endoflife-api"
 [[env.production.services]]
 binding = "API"
 service = "endoflife-api"
+
+# Usage telemetry (1.1.0): one data point per MCP method / tool call — tool
+# name, client user agent, ok/error, keyed/anon, latency. Query with the
+# Analytics Engine SQL API (dataset endoflife_mcp_usage). Optional: the code
+# no-ops when the binding is absent (wrangler dev without it, the stdio bridge).
+[[analytics_engine_datasets]]
+binding = "USAGE"
+dataset = "endoflife_mcp_usage"
+
+[[env.production.analytics_engine_datasets]]
+binding = "USAGE"
+dataset = "endoflife_mcp_usage"

@@ -1,13 +1,44 @@
 {
   "name": "endoflife-mcp",
-  "version": "1.0.2",
-  "private": true,
-  "description": "MCP server for endoflife.ai — software lifecycle intelligence for AI agents.",
+  "version": "1.3.0",
+  "description": "endoflife.ai MCP server \u2014 software lifecycle intelligence for AI agents (EOL dates, EOL Risk Score, CISA KEV exposure, EOS edge devices, SBOM checks). npx endoflife-mcp runs a stdio bridge to https://mcp.endoflife.ai.",
+  "license": "MIT",
+  "homepage": "https://endoflife.ai/mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/endoflife-ai/endoflife-mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "end-of-life",
+    "eol",
+    "cisa-kev",
+    "sbom",
+    "software-lifecycle"
+  ],
+  "bin": {
+    "endoflife-mcp": "stdio.js"
+  },
+  "files": [
+    "stdio.js",
+    "src/index.js",
+    "server.json",
+    "README.md",
+    "server.mjs",
+    "src/package.json",
+    "Dockerfile",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:prod": "wrangler deploy --env production",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "start": "node stdio.js"
   },
   "devDependencies": {
     "wrangler": "^3.80.0"
