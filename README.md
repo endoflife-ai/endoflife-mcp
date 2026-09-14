@@ -7,8 +7,9 @@ Protocol** (MCP, Streamable HTTP transport). A dependency-free Cloudflare Worker
 that wraps the public `api.endoflife.ai/v1` endpoints and the site's published
 feeds — no data duplicated, every answer carries a source URL.
 
-Current version: **1.1.0** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
-`package.json` — keep all three in step; the registry and Glama read `server.json`).
+Current version: **1.3.0** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
+`package.json` — keep all three in step; CI fails if they disagree; the registry and
+Glama read `server.json`).
 
 ## Tools (all read-only)
 
@@ -56,16 +57,13 @@ The binding is optional; the code no-ops without it.
 
 ## Deploy
 
-Production deploys run from GitHub Actions, never a local wrangler:
-
-```bash
-gh workflow run mcp-server-deploy.yml
-```
-
-(`.github/workflows/mcp-server-deploy.yml`, pinned wrangler; needs the
-`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` repository secrets.) Local
-`wrangler dev` still works for development; the `API` service binding and the
-`USAGE` dataset are declared for both the default and `production` environments.
+The hosted server at mcp.endoflife.ai is deployed by the maintainers from the
+endoflife.ai site repository's GitHub Actions workflow (pinned wrangler, Cloudflare
+credentials held there as repository secrets); this public repository carries no
+deploy workflow of its own. To run your own copy, `wrangler deploy` from this
+repository works with your own Cloudflare account, and `wrangler dev` runs it locally;
+the `API` service binding and the `USAGE` dataset in `wrangler.toml` are declared for
+both the default and `production` environments.
 
 ### Custom domain (mcp.endoflife.ai)
 
@@ -74,11 +72,13 @@ an **AAAA** record, name **mcp**, IPv6 **100::**, proxied. Already in place.
 
 ### Test before deploying
 
-A Node harness exercises every method against the live API and feeds (the module
-runs unchanged in Node with `env.API = { fetch }`):
+CI (`.github/workflows/ci.yml`) runs on every push and pull request and once a day:
+syntax checks, manifest validity, the version-agreement check, and a live smoke test
+that calls the deployed server's tools. The same smoke test runs locally:
 
 ```bash
-node scratch/mcp_test.mjs   # see the session scratchpad; 22 RPC calls, expects 0 failures
+node --check src/index.js && node --check stdio.js
+node .github/scripts/smoke.mjs   # real tool calls against mcp.endoflife.ai, expects 0 failures
 ```
 
 ## Run as a container (Red Hat UBI)
@@ -86,12 +86,12 @@ node scratch/mcp_test.mjs   # see the session scratchpad; 22 RPC calls, expects 
 `server.mjs` runs the same handler that serves mcp.endoflife.ai inside a plain Node.js process, and `Dockerfile` packages it on `registry.access.redhat.com/ubi9/nodejs-22-minimal` for cluster deploys (the form the OpenShift AI MCP catalog expects). No build step, no dependencies; the container talks to `https://api.endoflife.ai` over HTTPS and runs as the unprivileged UBI user (uid 1001).
 
 ```
-docker build -t endoflife-mcp mcp-server/
+docker build -t endoflife-mcp .
 docker run --rm -p 8080:8080 endoflife-mcp
 curl -s localhost:8080/health
 ```
 
-Endpoints are the Worker's own: `POST /` (Streamable HTTP JSON-RPC), `GET /health` (readiness), `GET /.well-known/mcp/server-card.json`. Set `ENDOFLIFE_API_KEY` to forward a Pro key. Validated on RHEL 9 and 10 with Node 20 and 22 by `.github/workflows/rhel-validation.yml` (evidence in `docs/company/redhat-validation-evidence.md`).
+Endpoints are the Worker's own: `POST /` (Streamable HTTP JSON-RPC), `GET /health` (readiness), `GET /.well-known/mcp/server-card.json`. Set `ENDOFLIFE_API_KEY` to forward a Pro key. The image is built on Red Hat UBI 9 with Node 22; the maintainers run it on RHEL 9 and 10 as part of their Red Hat partner validation, which lives outside this repository.
 
 ## Connect from an MCP client
 
