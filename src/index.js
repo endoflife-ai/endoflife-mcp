@@ -330,6 +330,11 @@ function authHeaders(request) {
     (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   const h = { 'Accept': 'application/json', 'User-Agent': `endoflife-mcp/${SERVER_INFO.version}` };
   if (key) h['X-API-Key'] = key;
+  // Tell the API this call comes from the hosted MCP server and forward the agent's address, so keyless
+  // agent traffic is metered per agent (the API's MCP bucket) instead of pooling under one anonymous address.
+  h['X-EOL-Client'] = 'mcp';
+  const clientIp = request.headers.get('CF-Connecting-IP');
+  if (clientIp) h['X-EOL-Client-IP'] = clientIp;
   return h;
 }
 
@@ -818,7 +823,11 @@ async function handleRpc(msg, request, env) {
       if (!name) return fail(-32602, 'Missing tool name.');
       try {
         const result = await runTool(name, args, request, env);
-        record(env, request, `tool:${name}`, !result.isError, Date.now() - t0);
+        // A handled failure (isError result) carries its message too, so the weekly
+        // readout can group failures by cause; before 2026-09-08 only thrown errors did,
+        // and a week of 23 scan_stack + 20 check_eol failures read '(no message)'.
+        const why = result.isError && result.content && result.content[0] && result.content[0].text;
+        record(env, request, `tool:${name}`, !result.isError, Date.now() - t0, why || undefined);
         return reply(result);
       } catch (e) {
         record(env, request, `tool:${name}`, false, Date.now() - t0, e && e.message);

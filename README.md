@@ -130,9 +130,9 @@ curl -s https://mcp.endoflife.ai/.well-known/mcp/server-card.json | jq
 ## Auth & tiers
 
 The read tools work with no key for individual use and evaluation (anonymous tier:
-100 requests a day, 5 components per SBOM or batch call). Agents that run inside a
+50 requests a day, 3 components per SBOM or batch call; the hosted endpoint gives each agent 200 a day). Agents that run inside a
 company's tooling, check inventories or call on a schedule are production use and
-belong on a paid key: Starter ($79/month, 10,000 requests a day, 25 per call) or
+belong on a paid key: Starter ($89/month, 10,000 requests a day, 25 per call) or
 Pro ($199/month, no daily cap, 50 per call), issued at checkout from
 https://endoflife.ai/api?utm_source=mcp#get-key. Forward it as an `X-API-Key`
 header; the Worker passes it straight through to `api.endoflife.ai`.
