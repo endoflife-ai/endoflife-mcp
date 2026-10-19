@@ -7,9 +7,17 @@ Protocol** (MCP, Streamable HTTP transport). A dependency-free Cloudflare Worker
 that wraps the public `api.endoflife.ai/v1` endpoints and the site's published
 feeds — no data duplicated, every answer carries a source URL.
 
-Current version: **1.3.0** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
-`package.json` — keep all three in step; CI fails if they disagree; the registry and
+Current version: **1.4.0** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
+`package.json`, the `Dockerfile` `ARG VERSION`, and the site's
+`endoflife/.well-known/mcp/server-card.json` — keep them in step; the registry and
 Glama read `server.json`).
+
+1.4.0: `check_sbom` is a thin proxy to the API's `POST /v1/sbom` (one resolver for
+every surface; versions keep their release family, e.g. python 3.12, ubuntu 20.04).
+Above the tier cap it returns the scored subset plus `limit_note` and
+`not_scored_count`; `scan_stack` scores the first N the tier allows and lists the rest
+in `not_checked`. Until 1.4.0 check_sbom cut every version to its major number and a
+keyless SBOM with more than 5 matched components returned nothing.
 
 ## Tools (all read-only)
 
@@ -18,13 +26,13 @@ Glama read `server.json`).
 | `check_eol` | Is product X version Y end-of-life? | `GET /v1/status/:slug/:version` |
 | `get_risk_score` | EOL Risk Score (0–100) + factor breakdown | `GET /v1/score/:slug[/:version]` |
 | `scan_stack` | Score a whole stack at once | `POST /v1/batch` |
-| `list_products` | Search the 500+ tracked products → resolve slugs | `GET /v1/products` |
+| `list_products` | Search the 600+ tracked products → resolve slugs | `GET /v1/products` |
 | `get_product_lifecycle` | Full version history + dates for one product | `GET /v1/product/:slug` |
 | `get_kev_exposure` | Every CISA KEV entry attributed to a product (date added, due date, required action verbatim) + Exploited & Unpatchable entries | `endoflife.ai/kev-products.json`, `exploited-and-unpatchable.json` |
 | `get_upcoming_eol` | Everything reaching EOL in the next N days (catalog-wide or a product list) | `endoflife.ai/scanner-db.json` |
 | `get_edge_device_status` | EOS Edge Device feed with BOD 26-02 statuses, filter by platform / status / model | `endoflife.ai/eos-edge-devices.json` |
 | `get_upgrade_path` | Supported targets, the site's recommendation, vendor-stated successor | `GET /v1/product/:slug`, `checker-db.json`, edge feed |
-| `check_sbom` | CycloneDX / SPDX JSON → components resolved by package URL (exact, purl-map.json) or by name when no purl → scored; unmatched listed with a reason, never guessed | `purl-map.json` + `POST /v1/batch` |
+| `check_sbom` | CycloneDX / SPDX JSON → components resolved by package URL (exact, purl-map.json) or by name when no purl → scored up to the tier cap, the rest counted in a note; unmatched listed with a reason, never guessed | `POST /v1/sbom` |
 
 Every tool advertises `annotations` (`readOnlyHint`, `idempotentHint`) and a
 permissive `outputSchema`; results are returned both as JSON text and as
@@ -57,13 +65,16 @@ The binding is optional; the code no-ops without it.
 
 ## Deploy
 
-The hosted server at mcp.endoflife.ai is deployed by the maintainers from the
-endoflife.ai site repository's GitHub Actions workflow (pinned wrangler, Cloudflare
-credentials held there as repository secrets); this public repository carries no
-deploy workflow of its own. To run your own copy, `wrangler deploy` from this
-repository works with your own Cloudflare account, and `wrangler dev` runs it locally;
-the `API` service binding and the `USAGE` dataset in `wrangler.toml` are declared for
-both the default and `production` environments.
+Production deploys run from GitHub Actions, never a local wrangler:
+
+```bash
+gh workflow run mcp-server-deploy.yml
+```
+
+(`.github/workflows/mcp-server-deploy.yml`, pinned wrangler; needs the
+`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` repository secrets.) Local
+`wrangler dev` still works for development; the `API` service binding and the
+`USAGE` dataset are declared for both the default and `production` environments.
 
 ### Custom domain (mcp.endoflife.ai)
 
@@ -72,26 +83,27 @@ an **AAAA** record, name **mcp**, IPv6 **100::**, proxied. Already in place.
 
 ### Test before deploying
 
-CI (`.github/workflows/ci.yml`) runs on every push and pull request and once a day:
-syntax checks, manifest validity, the version-agreement check, and a live smoke test
-that calls the deployed server's tools. The same smoke test runs locally:
+A Node harness exercises every method against the live API and feeds (the module
+runs unchanged in Node with `env.API = { fetch }`):
 
 ```bash
-node --check src/index.js && node --check stdio.js
-node .github/scripts/smoke.mjs   # real tool calls against mcp.endoflife.ai, expects 0 failures
+node scratch/mcp_test.mjs   # see the session scratchpad; 22 RPC calls, expects 0 failures
 ```
+
+Offline unit tests (fetch mocked, no network): `npm test` in `mcp-server/`
+(`node --test test/`).
 
 ## Run as a container (Red Hat UBI)
 
 `server.mjs` runs the same handler that serves mcp.endoflife.ai inside a plain Node.js process, and `Dockerfile` packages it on `registry.access.redhat.com/ubi9/nodejs-22-minimal` for cluster deploys (the form the OpenShift AI MCP catalog expects). No build step, no dependencies; the container talks to `https://api.endoflife.ai` over HTTPS and runs as the unprivileged UBI user (uid 1001).
 
 ```
-docker build -t endoflife-mcp .
+docker build -t endoflife-mcp mcp-server/
 docker run --rm -p 8080:8080 endoflife-mcp
 curl -s localhost:8080/health
 ```
 
-Endpoints are the Worker's own: `POST /` (Streamable HTTP JSON-RPC), `GET /health` (readiness), `GET /.well-known/mcp/server-card.json`. Set `ENDOFLIFE_API_KEY` to forward a Pro key. The image is built on Red Hat UBI 9 with Node 22; the maintainers run it on RHEL 9 and 10 as part of their Red Hat partner validation, which lives outside this repository.
+Endpoints are the Worker's own: `POST /` (Streamable HTTP JSON-RPC), `GET /health` (readiness), `GET /.well-known/mcp/server-card.json`. Set `ENDOFLIFE_API_KEY` (`docker run -e ENDOFLIFE_API_KEY=...`) and the server sends it as `X-API-Key` on every call that carries no key of its own. **A self-hosted server needs it from November 16, 2026 at 00:00 UTC**, when the API stops answering data requests without a key; only the hosted endpoint at mcp.endoflife.ai stays keyless. A free key is emailed at once from https://endoflife.ai/api#free-key (150 requests a day, no expiry; higher volume is on a paid key). Validated on RHEL 9 and 10 with Node 20 and 22 by `.github/workflows/rhel-validation.yml` (evidence in `docs/company/redhat-validation-evidence.md`).
 
 ## Connect from an MCP client
 
@@ -129,8 +141,12 @@ curl -s https://mcp.endoflife.ai/.well-known/mcp/server-card.json | jq
 
 ## Auth & tiers
 
-The read tools work with no key for individual use and evaluation (anonymous tier:
-50 requests a day, 3 components per SBOM or batch call; the hosted endpoint gives each agent 200 a day). Agents that run inside a
+The read tools work with no key for individual use and evaluation through the hosted
+endpoint mcp.endoflife.ai (each agent gets 200 a day and 5 per call). Calling the API
+directly, or running this server yourself, works without a key only until November 16,
+2026 at 00:00 UTC (anonymous tier: 50 requests a day, 3 components per SBOM or batch
+call); from then every data request needs a key (set `ENDOFLIFE_API_KEY` on a
+self-hosted server; free key at https://endoflife.ai/api#free-key). Agents that run inside a
 company's tooling, check inventories or call on a schedule are production use and
 belong on a paid key: Starter ($89/month, 10,000 requests a day, 25 per call) or
 Pro ($199/month, no daily cap, 50 per call), issued at checkout from

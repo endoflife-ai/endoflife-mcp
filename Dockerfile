@@ -13,13 +13,13 @@
 # writable filesystem beyond /tmp. Egress: api.endoflife.ai:443 only.
 FROM registry.access.redhat.com/ubi9/nodejs-22-minimal:latest
 
-ARG VERSION=1.3.0
+ARG VERSION=1.4.0
 LABEL name="endoflife-ai/mcp-server" \
       vendor="EndofLife AI Inc." \
       version="${VERSION}" \
       release="1" \
       maintainer="partners@endoflife.ai" \
-      summary="endoflife.ai MCP server: verified end-of-life dates, risk scores, KEV exposure and SBOM checks for 500+ products" \
+      summary="endoflife.ai MCP server: verified end-of-life dates, risk scores, KEV exposure and SBOM checks for 600+ products" \
       description="Model Context Protocol server exposing ten tools (check_eol, get_risk_score, scan_stack, list_products, get_product_lifecycle, get_kev_exposure, get_upcoming_eol, get_edge_device_status, get_upgrade_path, check_sbom) over Streamable HTTP. Every date it returns carries its source and verification time." \
       url="https://endoflife.ai/mcp" \
       io.k8s.display-name="endoflife.ai MCP server" \

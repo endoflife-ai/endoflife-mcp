@@ -1,5 +1,5 @@
 /**
- * endoflife.ai — MCP Server (1.3.0)
+ * endoflife.ai — MCP Server (1.4.0)
  * ---------------------------------------------------------------------------
  * A dependency-free Cloudflare Worker that exposes endoflife.ai's lifecycle
  * intelligence to AI agents via the Model Context Protocol (MCP), using the
@@ -20,7 +20,7 @@
  *   GET  /.well-known/mcp/server-card.json  → discovery card
  *
  * Auth: optional. An incoming `X-API-Key` header is forwarded to the upstream
- * API to unlock Pro limits; without it, callers get the free tier.
+ * API to raise limits (any key: free, Starter or Pro); without it, callers get the free tier.
  *
  * Usage telemetry (1.1.0): when an Analytics Engine binding `USAGE` exists, each
  * method / tool call writes one data point (tool, client user agent, ok/error,
@@ -35,11 +35,11 @@ const SERVER_INFO = {
   title: 'endoflife.ai — Software Lifecycle Intelligence',
   // Keep in step with server.json, package.json, and the published registry /
   // Glama release versions — a mismatch here is what clients see in initialize.
-  version: '1.3.0',
+  version: '1.4.0',
 };
 
 const INSTRUCTIONS =
-  'endoflife.ai tools return vendor-verified software end-of-life dates, the EOL Risk Score (0-100), ' +
+  'endoflife.ai tools return software end-of-life dates labelled with their source, the EOL Risk Score (0-100), ' +
   'CISA KEV exposure, and the EOS Edge Device feed (CISA BOD 26-02 statuses). Every result carries a ' +
   '"source" URL — cite it. Resolve a product name to its slug with list_products if a lookup misses; ' +
   'errors include "did you mean" suggestions. All tools are read-only.';
@@ -93,7 +93,8 @@ const TOOLS = [
     description:
       'Audit a whole stack at once. Provide a list of products (optionally with versions) — e.g. parsed from a ' +
       'package.json or Dockerfile — and get an EOL Risk Score for each, so you can see what is unsupported ' +
-      'and dangerous in one call. For CycloneDX or SPDX documents use check_sbom instead. Free tier: up to 5 items; Pro: up to 50.',
+      'and dangerous in one call. For CycloneDX or SPDX documents use check_sbom instead. Without a key: up to 5 items per call; ' +
+      'Starter 25; Pro 50. Items beyond the limit are listed as not checked, with a note.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -119,7 +120,7 @@ const TOOLS = [
     name: 'list_products',
     title: 'Find a product slug',
     description:
-      'List or search the products endoflife.ai tracks (500+). Pass an optional "query" substring to find the ' +
+      'List or search the products endoflife.ai tracks (600+). Pass an optional "query" substring to find the ' +
       'canonical slug for a product before calling the other tools (e.g. "postgres" → "postgresql"). ' +
       'Returns matching product slugs.',
     inputSchema: {
@@ -233,12 +234,14 @@ const TOOLS = [
     description:
       'Audit a CycloneDX or SPDX JSON software bill of materials. Components are mapped to tracked products and ' +
       'scored for EOL risk; unmatched components are listed honestly rather than guessed. Pass the SBOM as a JSON ' +
-      'string or object. Free tier scores up to 5 matched components per call; Pro up to 50.',
+      'string or object. Versions resolve to their release family (python 3.12, php 7.4, ubuntu 20.04). Without a key ' +
+      'up to 5 matched components are scored per call; Starter 25; Pro 50. Larger SBOMs return the scored subset plus a ' +
+      'note of how many were not checked.',
     inputSchema: {
       type: 'object',
       properties: {
         sbom: { description: 'The SBOM document (JSON string or object). CycloneDX (bomFormat/components) or SPDX (spdxVersion/packages).' },
-        max_items: { type: 'integer', description: 'Maximum matched components to score (default 50).' },
+        max_items: { type: 'integer', description: 'Optional: return at most this many scored components (the tier cap applies first).' },
       },
       required: ['sbom'],
     },
@@ -325,7 +328,7 @@ const CORS = {
 };
 
 // ── Upstream API helpers ────────────────────────────────────────────────────
-function authHeaders(request) {
+function authHeaders(request, env) {
   const key = request.headers.get('X-API-Key') ||
     (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   const h = { 'Accept': 'application/json', 'User-Agent': `endoflife-mcp/${SERVER_INFO.version}` };
@@ -335,6 +338,9 @@ function authHeaders(request) {
   h['X-EOL-Client'] = 'mcp';
   const clientIp = request.headers.get('CF-Connecting-IP');
   if (clientIp) h['X-EOL-Client-IP'] = clientIp;
+  // The API honours the MCP bucket only with this shared secret (Worker secret MCP_SHARED_SECRET on both
+  // Workers, 2026-10-16): the two headers above can be sent by anyone. Sent only over the service binding.
+  if (env && env.MCP_SHARED_SECRET && env.API && typeof env.API.fetch === 'function') h['X-EOL-MCP-Secret'] = env.MCP_SHARED_SECRET;
   return h;
 }
 
@@ -351,7 +357,7 @@ function apiFetch(url, init, env) {
 }
 
 async function apiGet(path, request, env) {
-  const res = await apiFetch(`${API_BASE}${path}`, { headers: authHeaders(request) }, env);
+  const res = await apiFetch(`${API_BASE}${path}`, { headers: authHeaders(request, env) }, env);
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
   return { ok: res.ok, status: res.status, data };
@@ -360,7 +366,7 @@ async function apiGet(path, request, env) {
 async function apiPost(path, body, request, env) {
   const res = await apiFetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { ...authHeaders(request), 'Content-Type': 'application/json' },
+    headers: { ...authHeaders(request, env), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }, env);
   const text = await res.text();
@@ -435,99 +441,29 @@ async function notFound(request, env, what, name) {
   return toolError(`${what}` + (sug.length ? ` Did you mean: ${sug.join(', ')}? (Use list_products to search.)` : ' Use list_products to find the canonical slug.'));
 }
 
-// ── SBOM parsing (mirrors the site's Stack Scanner) ────────────────────────
-function parseSbom(input) {
-  let doc = input;
-  if (typeof doc === 'string') { try { doc = JSON.parse(doc); } catch { return { error: 'The SBOM is not valid JSON.' }; } }
-  if (!doc || typeof doc !== 'object') return { error: 'The SBOM must be a JSON object.' };
-  const deps = [];
-  if (doc.bomFormat === 'CycloneDX' && Array.isArray(doc.components)) {
-    for (const c of doc.components) {
-      if (!c || (!c.name && !c.purl)) continue;
-      const purl = typeof c.purl === 'string' ? c.purl.trim() : null;
-      const pp = purl ? parsePurl(purl) : null;
-      const name = c.name ? String(c.name) : (pp ? pp.path.split('/').pop() : '');
-      const version = c.version ? String(c.version) : (pp && pp.version ? pp.version : '');
-      deps.push({ name, version, purl });
-    }
-    return { format: 'cyclonedx', deps };
+// ── Tier caps: what to say when the API scores only part of a request ──────
+// check_sbom and scan_stack never resolve or truncate versions themselves: the
+// API's POST /v1/sbom and POST /v1/batch do it (one resolver for every surface).
+// Until 1.4.0 check_sbom carried its own resolver that cut every version to its
+// major number (python 3.12 asked as "3": Version not found) and sent one
+// /v1/batch call the API refused above the tier's batch size, so a keyless agent
+// with more than 5 matched components got nothing back at all.
+const GET_KEY_URL = `${SITE_BASE}/api?utm_source=mcp#get-key`;
+function callerHasKey(request) {
+  return !!(request.headers.get('X-API-Key') || (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''));
+}
+function moreCapacityHint(tier, hasKey) {
+  if (!hasKey || tier === 'anon') {
+    return `Send an endoflife.ai API key as an X-API-Key header to check more per call (Starter: 25 components, Pro: 50): ${GET_KEY_URL}`;
   }
-  if (typeof doc.spdxVersion === 'string' && Array.isArray(doc.packages)) {
-    for (const p of doc.packages) {
-      if (!p || !p.name) continue;
-      const ref = (p.externalRefs || []).find(r => r && r.referenceType === 'purl' && typeof r.referenceLocator === 'string');
-      const purl = ref ? ref.referenceLocator.trim() : null;
-      const pp = purl ? parsePurl(purl) : null;
-      const v = p.versionInfo && p.versionInfo !== 'NOASSERTION' ? String(p.versionInfo) : (pp && pp.version ? pp.version : '');
-      deps.push({ name: String(p.name), version: v, purl });
-    }
-    return { format: 'spdx', deps };
-  }
-  return { error: 'Unrecognised SBOM: expected CycloneDX (bomFormat + components) or SPDX (spdxVersion + packages) JSON.' };
+  if (tier === 'free') return `Free keys check 5 per call; Starter checks 25 and Pro 50: ${GET_KEY_URL}`;
+  if (tier === 'starter') return `Starter checks 25 per call; Pro checks 50: ${GET_KEY_URL}`;
+  return 'Pro checks 50 per call; send the remaining components in a further call.';
 }
-
-// Package-name → product-slug aliases the bare slugify cannot infer.
-const NAME_ALIASES = {
-  'node': 'nodejs', 'node.js': 'nodejs', 'nodejs': 'nodejs', 'python3': 'python', 'postgres': 'postgresql', 'pg': 'postgresql',
-  'mongo': 'mongodb', 'k8s': 'kubernetes', 'golang': 'go', 'dotnet': 'dotnet', '.net': 'dotnet', 'openjdk': 'openjdk-builds-from-oracle',
-  'java': 'oracle-jdk', 'ruby-on-rails': 'rails', 'rails': 'rails', 'django': 'django', 'flask': 'flask', 'react-dom': 'react',
-  'vue': 'vue', '@angular/core': 'angular', 'angular': 'angular', 'express': 'express', 'spring-boot': 'spring-boot',
-  'org.springframework.boot:spring-boot': 'spring-boot', 'org.springframework:spring-core': 'spring-framework',
-  'lodash': 'lodash', 'moment': 'moment', 'jquery': 'jquery', 'bootstrap': 'bootstrap', 'nginx': 'nginx', 'redis': 'redis',
-  'mysql': 'mysql', 'mariadb': 'mariadb', 'elasticsearch': 'elasticsearch', 'kafka': 'apache-kafka', 'tomcat': 'tomcat',
-  'apache-tomcat': 'tomcat', 'php': 'php', 'openssl': 'openssl', 'debian': 'debian', 'ubuntu': 'ubuntu', 'alpine': 'alpine-linux',
-  'centos': 'centos', 'rhel': 'rhel', 'log4j': 'log4j', 'org.apache.logging.log4j:log4j-core': 'log4j',
-};
-function majorOf(v) {
-  const m = /^v?(\d+)(?:\.(\d+))?/.exec(String(v || ''));
-  return m ? m[1] : '';
-}
-// Package URL parsing/normalisation — kept in sync with api-worker/src/sbom.js
-// and scripts/purl-harvest.js. The version separator is the last '@' that is
-// not the first character of a path segment (npm scopes: @scope/name).
-function parsePurl(p) {
-  const s = String(p || '').trim();
-  const m = /^pkg:([A-Za-z0-9.+-]+)\/(.+)$/.exec(s);
-  if (!m) return null;
-  let rest = m[2];
-  const hash = rest.indexOf('#'); if (hash >= 0) rest = rest.slice(0, hash);
-  const q = rest.indexOf('?'); if (q >= 0) rest = rest.slice(0, q);
-  let version = null;
-  const at = rest.lastIndexOf('@');
-  if (at > 0 && rest[at - 1] !== '/') { version = rest.slice(at + 1) || null; rest = rest.slice(0, at); }
-  if (!rest || /^[/@]*$/.test(rest)) return null;
-  return { type: m[1].toLowerCase(), path: rest.replace(/%40/gi, '@'), version };
-}
-function normalisePurl(p) {
-  const x = parsePurl(p); if (!x) return null;
-  let name = x.path;
-  if (x.type === 'pypi') name = name.replace(/_/g, '-');
-  return `pkg:${x.type}/${name}`.toLowerCase();
-}
-// purl-map.json (built from data/purl-map.json): { lookup: { normalised purl -> slug } }
-async function purlLookup() {
-  const m = await fetchStatic('/purl-map.json').catch(() => null);
-  return m && m.lookup && typeof m.lookup === 'object' ? m.lookup : {};
-}
-
-// Resolve a component: purl first (exact, never a name guess when a purl is
-// present), name second. Returns { slug, how } or null.
-function mapDepToProduct(dep, slugs, lookup) {
-  if (dep.purl) {
-    const key = normalisePurl(dep.purl);
-    if (key && lookup && lookup[key]) return { slug: lookup[key], how: 'purl' };
-    return null;
-  }
-  const s = mapNameToProduct(dep, slugs);
-  return s ? { slug: s, how: 'name' } : null;
-}
-function mapNameToProduct(dep, slugs) {
-  const raw = String(dep.name || '').toLowerCase().trim();
-  const bare = raw.includes('/') ? raw.split('/').pop() : raw;
-  const candidates = [NAME_ALIASES[raw], NAME_ALIASES[bare], slugify(raw), slugify(bare)].filter(Boolean);
-  const slugSet = new Set(slugs);
-  for (const c of candidates) if (slugSet.has(c)) return c;
-  return null;
+// "Batch limit is 5 products for Free tier." → 5
+function batchLimitFrom(r) {
+  const m = /Batch limit is (\d+)/i.exec(upstreamMsg(r, ''));
+  return m ? parseInt(m[1], 10) : null;
 }
 
 // ── Tool implementations ────────────────────────────────────────────────────
@@ -560,9 +496,29 @@ async function runTool(name, args, request, env) {
         slug: slugify(i.product),
         ...(i.version ? { version: String(i.version) } : {}),
       })).filter(i => i.slug);
-      const r = await apiPost('/v1/batch', { products }, request, env);
+      if (!products.length) return toolError('No item in "items" has a product name.');
+      let r = await apiPost('/v1/batch', { products }, request, env);
+      // Over the tier's batch size the API refuses the whole call (403, or 400
+      // for Pro above 50). Score the first N it allows and say what was left out,
+      // rather than returning nothing.
+      let sent = products;
+      const cap = !r.ok && (r.status === 403 || r.status === 400) ? batchLimitFrom(r) : null;
+      if (cap && cap > 0 && cap < products.length) {
+        sent = products.slice(0, cap);
+        r = await apiPost('/v1/batch', { products: sent }, request, env);
+      }
       if (!r.ok) return toolError(upstreamMsg(r, 'Batch scan failed.'));
-      return toolJson(r.data);
+      if (sent.length === products.length) return toolJson(r.data);
+      const left = products.slice(sent.length);
+      return toolJson({
+        ...r.data,
+        requested: products.length,
+        scored: sent.length,
+        batch_limit: cap,
+        not_checked_count: left.length,
+        not_checked: left.map(i => ({ product: i.slug, ...(i.version ? { version: i.version } : {}) })),
+        limit_note: `Scored the first ${sent.length} of ${products.length} items: this tier checks ${cap} per call. ${left.length} item(s) were not checked (listed in not_checked). ${moreCapacityHint(r.data && r.data.tier, callerHasKey(request))}`,
+      });
     }
     case 'list_products': {
       const all = await productSlugs(request, env);
@@ -721,34 +677,55 @@ async function runTool(name, args, request, env) {
     }
     case 'check_sbom': {
       if (args.sbom === undefined || args.sbom === null) return toolError('"sbom" is required (CycloneDX or SPDX JSON).');
-      const parsed = parseSbom(args.sbom);
-      if (parsed.error) return toolError(parsed.error);
-      const max = Math.min(Math.max(parseInt(args.max_items, 10) || 50, 1), 50);
-      const [slugs, lookup] = await Promise.all([productSlugs(request, env), purlLookup()]);
-      const matched = [], unmatched = [], seen = new Set();
-      for (const dep of parsed.deps) {
-        const label = dep.purl || (dep.name + (dep.version ? '@' + dep.version : ''));
-        const r = mapDepToProduct(dep, slugs, lookup);
-        if (!r) { unmatched.push({ component: label, reason: dep.purl ? 'purl not tracked' : 'name not recognised' }); continue; }
-        const version = majorOf(dep.version);
-        const key = r.slug + '@' + version;
-        if (seen.has(key)) continue; seen.add(key);
-        matched.push({ slug: r.slug, ...(version ? { version } : {}), component: label, matched_by: r.how });
+      let doc = args.sbom;
+      if (typeof doc === 'string') { try { doc = JSON.parse(doc); } catch { return toolError('The SBOM is not valid JSON.'); } }
+      if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return toolError('The SBOM must be a JSON object.');
+      // One call to the API's SBOM route: it parses the whole document (nested
+      // and metadata components included), resolves by purl then name, keeps each
+      // version's release family (3.12, 7.4, 20.04) and scores up to the tier cap.
+      const r = await apiPost('/v1/sbom', { sbom: doc }, request, env);
+      const hasKey = callerHasKey(request);
+      if (!r.ok) {
+        // A refused or rate-limited call still answers with what happened and
+        // how to get more, never an empty result with no explanation.
+        if (r.status === 403 || r.status === 429) {
+          const msg = upstreamMsg(r, `The API refused the SBOM check (HTTP ${r.status}).`);
+          return toolJson({
+            format: null, components: null, matched: null, matched_by: null,
+            scored: 0, not_scored_count: null, results: [], unmatched: [], unmatched_count: null,
+            batch_error: msg, limit_reached: true, http_status: r.status,
+            limit_note: `Nothing was checked: ${msg} ` + (hasKey
+              ? `Check that the X-API-Key sent with this call is current, or get one at ${GET_KEY_URL}`
+              : moreCapacityHint('anon', false)),
+            note: 'The endoflife.ai API declined this call, so no component was scored. The SBOM itself was not rejected; retry with an API key or after the daily limit resets.',
+            product_url: `${SITE_BASE}/scanner`,
+          });
+        }
+        return toolError(upstreamMsg(r, 'SBOM check failed.'));
       }
-      const toScore = matched.slice(0, max);
-      let results = [], batchError = null;
-      if (toScore.length) {
-        const r = await apiPost('/v1/batch', { products: toScore.map(({ slug, version }) => ({ slug, ...(version ? { version } : {}) })) }, request, env);
-        if (r.ok) results = Array.isArray(r.data.results) ? r.data.results : r.data;
-        else batchError = upstreamMsg(r, 'Batch scoring failed.');
+      const d = r.data || {};
+      const all = Array.isArray(d.results) ? d.results : [];
+      const maxItems = parseInt(args.max_items, 10);
+      const results = Number.isFinite(maxItems) && maxItems >= 1 ? all.slice(0, maxItems) : all;
+      const matched = typeof d.matched === 'number' ? d.matched : results.length;
+      const notScored = Math.max(0, matched - results.length);
+      let limitNote;
+      if (notScored > 0) {
+        const byCap = typeof d.scoring_cap === 'number' && all.length >= d.scoring_cap && results.length === all.length;
+        limitNote = byCap
+          ? `Scored ${results.length} of ${matched} matched components: this tier checks ${d.scoring_cap} per call. ${notScored} matched component(s) were not checked. ${moreCapacityHint(d.tier, hasKey)}`
+          : `Returned ${results.length} of ${matched} matched components (max_items ${maxItems}). ${notScored} matched component(s) are not in this answer.`;
       }
       return toolJson({
-        format: parsed.format, components: parsed.deps.length, matched: matched.length,
-        matched_by: { purl: matched.filter(m => m.matched_by === 'purl').length, name: matched.filter(m => m.matched_by === 'name').length },
-        scored: toScore.length,
-        results, unmatched: unmatched.slice(0, 200), unmatched_count: unmatched.length,
-        batch_error: batchError,
-        note: 'Components with a package URL resolve only by purl (exact, against endoflife.ai/purl-map.json); components without one resolve by name. Unmatched components are not tracked by endoflife.ai and are listed rather than guessed. Versions are matched on their major (or major.minor) cycle.',
+        format: d.format, spec_version: d.spec_version, components: d.components, matched,
+        matched_by: d.matched_by,
+        scored: results.length, scoring_cap: d.scoring_cap, not_scored_count: notScored, tier: d.tier,
+        summary: d.summary,
+        results, unmatched: Array.isArray(d.unmatched) ? d.unmatched.slice(0, 200) : [], unmatched_count: d.unmatched_count,
+        batch_error: null,
+        limit_note: limitNote,
+        note: d.note || 'Components with a package URL resolve only by purl; components without one resolve by name. Unmatched components are listed rather than guessed. Versions resolve to the release family (major or major.minor), never the patch build.',
+        kev_catalog: d.kev_catalog,
         product_url: `${SITE_BASE}/scanner`,
       });
     }
@@ -876,9 +853,9 @@ function serverCard() {
     $schema: 'https://modelcontextprotocol.io/schemas/draft/server-card.json',
     serverInfo: SERVER_INFO,
     description:
-      'Software lifecycle intelligence for AI agents: vendor-verified end-of-life dates, support status, the EOL Risk Score ' +
+      'Software lifecycle intelligence for AI agents: end-of-life dates labelled with their source, support status, the EOL Risk Score ' +
       '(0-100, factoring EOL recency, attack surface, and CISA KEV exposure), CISA KEV exposure records, an upcoming-EOL ' +
-      'calendar, upgrade paths, SBOM checks and the EOS Edge Device feed (BOD 26-02) for 500+ products and 8,000+ versions.',
+      'calendar, upgrade paths, SBOM checks and the EOS Edge Device feed (BOD 26-02) for 600+ products and 13,000+ versions.',
     transport: { type: 'streamable-http', endpoint: 'https://mcp.endoflife.ai' },
     capabilities: { tools: {}, resources: {}, prompts: {} },
     tools: TOOLS.map(t => ({ name: t.name, description: t.description.split('. ')[0] + '.' })),
@@ -919,7 +896,7 @@ ${prompts}
 
 Resources: the site's feeds (llms.txt, EOS Edge Device feed, Exploited & Unpatchable, KEV by product, edge change log).
 
-Optional: send an "X-API-Key" header to unlock Pro limits.
+Optional: send an "X-API-Key" header (a free, Starter or Pro key) for higher limits. No key is needed here.
 Health: GET /health   ·   Docs: https://endoflife.ai/mcp   ·   API: https://endoflife.ai/api
 `;
 }

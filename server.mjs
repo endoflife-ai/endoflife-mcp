@@ -34,6 +34,12 @@ async function toRequest(req) {
     if (v === undefined) continue;
     headers.set(k, Array.isArray(v) ? v.join(', ') : v);
   }
+  // The operator's key (ENDOFLIFE_API_KEY) for calls that carry none of their own: the Worker
+  // forwards X-API-Key to the API, which needs a key on data routes from 2026-11-16 (keyless
+  // access ends then). A key the MCP client sends itself still wins. Until 2026-10-16 this
+  // variable was documented above but never read, so every self-hosted call went keyless.
+  const operatorKey = (process.env.ENDOFLIFE_API_KEY || '').trim();
+  if (operatorKey && !headers.has('x-api-key') && !headers.has('authorization')) headers.set('x-api-key', operatorKey);
   let body;
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     const chunks = [];
