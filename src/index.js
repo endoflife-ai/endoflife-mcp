@@ -855,7 +855,7 @@ function serverCard() {
     description:
       'Software lifecycle intelligence for AI agents: end-of-life dates labelled with their source, support status, the EOL Risk Score ' +
       '(0-100, factoring EOL recency, attack surface, and CISA KEV exposure), CISA KEV exposure records, an upcoming-EOL ' +
-      'calendar, upgrade paths, SBOM checks and the EOS Edge Device feed (BOD 26-02) for 600+ products and 13,000+ versions.',
+      'calendar, upgrade paths, SBOM checks and the EOS Edge Device feed (BOD 26-02) for 700+ products and 14,000+ versions.',
     transport: { type: 'streamable-http', endpoint: 'https://mcp.endoflife.ai' },
     capabilities: { tools: {}, resources: {}, prompts: {} },
     tools: TOOLS.map(t => ({ name: t.name, description: t.description.split('. ')[0] + '.' })),

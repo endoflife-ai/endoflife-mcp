@@ -26,7 +26,7 @@ keyless SBOM with more than 5 matched components returned nothing.
 | `check_eol` | Is product X version Y end-of-life? | `GET /v1/status/:slug/:version` |
 | `get_risk_score` | EOL Risk Score (0–100) + factor breakdown | `GET /v1/score/:slug[/:version]` |
 | `scan_stack` | Score a whole stack at once | `POST /v1/batch` |
-| `list_products` | Search the 600+ tracked products → resolve slugs | `GET /v1/products` |
+| `list_products` | Search the 700+ tracked products → resolve slugs | `GET /v1/products` |
 | `get_product_lifecycle` | Full version history + dates for one product | `GET /v1/product/:slug` |
 | `get_kev_exposure` | Every CISA KEV entry attributed to a product (date added, due date, required action verbatim) + Exploited & Unpatchable entries | `endoflife.ai/kev-products.json`, `exploited-and-unpatchable.json` |
 | `get_upcoming_eol` | Everything reaching EOL in the next N days (catalog-wide or a product list) | `endoflife.ai/scanner-db.json` |
