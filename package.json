@@ -1,6 +1,6 @@
 {
   "name": "endoflife-mcp",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "endoflife.ai MCP server \u2014 software lifecycle intelligence for AI agents (EOL dates, EOL Risk Score, CISA KEV exposure, EOS edge devices, SBOM checks). npx endoflife-mcp runs a stdio bridge to https://mcp.endoflife.ai.",
   "license": "MIT",
   "homepage": "https://endoflife.ai/mcp",

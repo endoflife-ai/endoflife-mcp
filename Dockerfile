@@ -13,7 +13,7 @@
 # writable filesystem beyond /tmp. Egress: api.endoflife.ai:443 only.
 FROM registry.access.redhat.com/ubi9/nodejs-22-minimal:latest
 
-ARG VERSION=1.4.0
+ARG VERSION=1.4.1
 LABEL name="endoflife-ai/mcp-server" \
       vendor="EndofLife AI Inc." \
       version="${VERSION}" \

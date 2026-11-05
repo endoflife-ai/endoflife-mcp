@@ -7,10 +7,13 @@ Protocol** (MCP, Streamable HTTP transport). A dependency-free Cloudflare Worker
 that wraps the public `api.endoflife.ai/v1` endpoints and the site's published
 feeds — no data duplicated, every answer carries a source URL.
 
-Current version: **1.4.0** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
+Current version: **1.4.1** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
 `package.json`, the `Dockerfile` `ARG VERSION`, and the site's
 `endoflife/.well-known/mcp/server-card.json` — keep them in step; the registry and
 Glama read `server.json`).
+
+1.4.1: description and tool text carry the current build-computed counts
+(700+ products, 15,000+ versions) for the registry and npm listings; no behaviour change.
 
 1.4.0: `check_sbom` is a thin proxy to the API's `POST /v1/sbom` (one resolver for
 every surface; versions keep their release family, e.g. python 3.12, ubuntu 20.04).

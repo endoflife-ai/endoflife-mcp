@@ -1,5 +1,5 @@
 /**
- * endoflife.ai — MCP Server (1.4.0)
+ * endoflife.ai — MCP Server (1.4.1)
  * ---------------------------------------------------------------------------
  * A dependency-free Cloudflare Worker that exposes endoflife.ai's lifecycle
  * intelligence to AI agents via the Model Context Protocol (MCP), using the
@@ -35,7 +35,7 @@ const SERVER_INFO = {
   title: 'endoflife.ai — Software Lifecycle Intelligence',
   // Keep in step with server.json, package.json, and the published registry /
   // Glama release versions — a mismatch here is what clients see in initialize.
-  version: '1.4.0',
+  version: '1.4.1',
 };
 
 const INSTRUCTIONS =
@@ -120,7 +120,7 @@ const TOOLS = [
     name: 'list_products',
     title: 'Find a product slug',
     description:
-      'List or search the products endoflife.ai tracks (600+). Pass an optional "query" substring to find the ' +
+      'List or search the 700+ products endoflife.ai tracks. Pass an optional "query" substring to find the ' +
       'canonical slug for a product before calling the other tools (e.g. "postgres" → "postgresql"). ' +
       'Returns matching product slugs.',
     inputSchema: {
@@ -395,10 +395,29 @@ async function fetchStatic(pathname, asText) {
 
 // Product slug list from the API, memoised (used for suggestions and SBOM mapping).
 let productListMemo = { value: null, until: 0 };
+// The product list is public (it is the /products page), so a refused or
+// failed /v1/products call must not blank it. 2026-10-28 readout: 16
+// list_products calls in 30 days returned "Could not fetch product list"
+// because an anonymous caller over its daily allowance (or an API blip) got
+// a non-200 here. Fall back to the site's scanner-db.json (same slugs, less
+// the few API-only AI-model products); keep the API's message for the rare
+// case where both fail.
+let productListError = null;
 async function productSlugs(request, env) {
   if (productListMemo.value && productListMemo.until > Date.now()) return productListMemo.value;
-  const r = await apiGet('/v1/products', request, env);
-  const list = r.ok && Array.isArray(r.data.products) ? r.data.products.map(String) : [];
+  let list = [];
+  productListError = null;
+  try {
+    const r = await apiGet('/v1/products', request, env);
+    if (r.ok && Array.isArray(r.data.products)) list = r.data.products.map(String);
+    else productListError = upstreamMsg(r, null);
+  } catch (e) { productListError = e.message; }
+  if (!list.length) {
+    try {
+      const db = await fetchStatic('/scanner-db.json');
+      list = Object.keys((db && db.products) || {}).sort();
+    } catch { list = []; }
+  }
   if (list.length) productListMemo = { value: list, until: Date.now() + STATIC_TTL_MS };
   return list;
 }
@@ -522,7 +541,7 @@ async function runTool(name, args, request, env) {
     }
     case 'list_products': {
       const all = await productSlugs(request, env);
-      if (!all.length) return toolError('Could not fetch product list.');
+      if (!all.length) return toolError(`Could not fetch the product list${productListError ? ` (${productListError})` : ''}. The full list is at ${SITE_BASE}/products.`);
       const q = (args.query || '').toLowerCase().trim();
       let products = q ? all.filter(s => s.toLowerCase().includes(q)) : all;
       if (q && !products.length) products = suggestSlugs(q, all, 10);
@@ -855,7 +874,7 @@ function serverCard() {
     description:
       'Software lifecycle intelligence for AI agents: end-of-life dates labelled with their source, support status, the EOL Risk Score ' +
       '(0-100, factoring EOL recency, attack surface, and CISA KEV exposure), CISA KEV exposure records, an upcoming-EOL ' +
-      'calendar, upgrade paths, SBOM checks and the EOS Edge Device feed (BOD 26-02) for 700+ products and 14,000+ versions.',
+      'calendar, upgrade paths, SBOM checks and the EOS Edge Device feed (BOD 26-02) for 700+ products and 15,000+ versions.',
     transport: { type: 'streamable-http', endpoint: 'https://mcp.endoflife.ai' },
     capabilities: { tools: {}, resources: {}, prompts: {} },
     tools: TOOLS.map(t => ({ name: t.name, description: t.description.split('. ')[0] + '.' })),

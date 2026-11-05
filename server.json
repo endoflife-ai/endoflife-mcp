@@ -3,7 +3,7 @@
   "name": "io.github.endoflife-ai/endoflife-mcp",
   "title": "endoflife.ai — Software Lifecycle Intelligence",
   "description": "EOL dates, risk scores, CISA KEV exposure, SBOM audits and edge-device EOS for 700+ products.",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "repository": {
     "url": "https://github.com/endoflife-ai/endoflife-mcp",
     "source": "github"
