@@ -7,10 +7,19 @@ Protocol** (MCP, Streamable HTTP transport). A dependency-free Cloudflare Worker
 that wraps the public `api.endoflife.ai/v1` endpoints and the site's published
 feeds — no data duplicated, every answer carries a source URL.
 
-Current version: **1.4.1** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
+Current version: **1.4.4** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
 `package.json`, the `Dockerfile` `ARG VERSION`, and the site's
 `endoflife/.well-known/mcp/server-card.json` — keep them in step; the registry and
 Glama read `server.json`).
+
+1.4.4: check_sbom declares its sbom input as object or string (the directory portal flags an input with no type).
+
+1.4.3: scan_stack and check_sbom descriptions state the keyless per-call limit without naming plans (Claude Connectors Directory review: tool descriptions must not promote products); the limit note in answers is unchanged.
+
+1.4.2: tools accept the argument shapes clients actually send (name, slug or cycle
+for product and version, "python 3.12" as one string, arguments as a JSON string,
+scan_stack items as strings or a comma list), and a missing argument gets an error
+that says what to send, with an example.
 
 1.4.1: description and tool text carry the current build-computed counts
 (700+ products, 15,000+ versions) for the registry and npm listings; no behaviour change.

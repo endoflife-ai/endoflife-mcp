@@ -1,5 +1,5 @@
 /**
- * endoflife.ai — MCP Server (1.4.1)
+ * endoflife.ai — MCP Server (1.4.4)
  * ---------------------------------------------------------------------------
  * A dependency-free Cloudflare Worker that exposes endoflife.ai's lifecycle
  * intelligence to AI agents via the Model Context Protocol (MCP), using the
@@ -35,7 +35,7 @@ const SERVER_INFO = {
   title: 'endoflife.ai — Software Lifecycle Intelligence',
   // Keep in step with server.json, package.json, and the published registry /
   // Glama release versions — a mismatch here is what clients see in initialize.
-  version: '1.4.1',
+  version: '1.4.4',
 };
 
 const INSTRUCTIONS =
@@ -93,8 +93,8 @@ const TOOLS = [
     description:
       'Audit a whole stack at once. Provide a list of products (optionally with versions) — e.g. parsed from a ' +
       'package.json or Dockerfile — and get an EOL Risk Score for each, so you can see what is unsupported ' +
-      'and dangerous in one call. For CycloneDX or SPDX documents use check_sbom instead. Without a key: up to 5 items per call; ' +
-      'Starter 25; Pro 50. Items beyond the limit are listed as not checked, with a note.',
+      'and dangerous in one call. For CycloneDX or SPDX documents use check_sbom instead. Without an API key up to 5 ' +
+      'items are checked per call (a key raises the limit); items beyond it are listed as not checked, with a note.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -234,13 +234,13 @@ const TOOLS = [
     description:
       'Audit a CycloneDX or SPDX JSON software bill of materials. Components are mapped to tracked products and ' +
       'scored for EOL risk; unmatched components are listed honestly rather than guessed. Pass the SBOM as a JSON ' +
-      'string or object. Versions resolve to their release family (python 3.12, php 7.4, ubuntu 20.04). Without a key ' +
-      'up to 5 matched components are scored per call; Starter 25; Pro 50. Larger SBOMs return the scored subset plus a ' +
-      'note of how many were not checked.',
+      'string or object. Versions resolve to their release family (python 3.12, php 7.4, ubuntu 20.04). Without an API key ' +
+      'up to 5 matched components are scored per call (a key raises the limit); larger SBOMs return the scored subset ' +
+      'plus a note of how many were not checked.',
     inputSchema: {
       type: 'object',
       properties: {
-        sbom: { description: 'The SBOM document (JSON string or object). CycloneDX (bomFormat/components) or SPDX (spdxVersion/packages).' },
+        sbom: { type: ['object', 'string'], description: 'The SBOM document (JSON string or object). CycloneDX (bomFormat/components) or SPDX (spdxVersion/packages).' },
         max_items: { type: 'integer', description: 'Optional: return at most this many scored components (the tier cap applies first).' },
       },
       required: ['sbom'],
@@ -486,12 +486,64 @@ function batchLimitFrom(r) {
 }
 
 // ── Tool implementations ────────────────────────────────────────────────────
+// Usage readout 2026-10-29 to 11-05: about 40 tool calls a week failed only
+// because the client named the arguments differently (name/slug/cycle), sent
+// "python 3.12" as one string, sent arguments as a JSON string, or gave
+// scan_stack a plain list. Accept those shapes and, when something is still
+// missing, say exactly what to send with an example.
+const PRODUCT_KEYS = ['product', 'name', 'slug', 'product_name', 'productName', 'software', 'technology', 'package', 'id'];
+const VERSION_KEYS = ['version', 'cycle', 'release', 'product_version', 'productVersion', 'ver'];
+function firstOf(o, keys) {
+  for (const k of keys) {
+    const v = o[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+  }
+  return undefined;
+}
+// "python 3.12" or "python@3.12" with no separate version → product + version.
+function splitProductVersion(product, version) {
+  if (product === undefined || version !== undefined) return { product, version };
+  const m = /^\s*(.+?)(?:\s+|@)v?(\d[\w.]*)\s*$/.exec(String(product));
+  return m ? { product: m[1], version: m[2] } : { product, version };
+}
+function normalizeItem(i) {
+  if (typeof i === 'string') {
+    const s = splitProductVersion(i.trim(), undefined);
+    return { product: s.product, ...(s.version ? { version: s.version } : {}) };
+  }
+  if (!i || typeof i !== 'object') return {};
+  const s = splitProductVersion(firstOf(i, PRODUCT_KEYS), firstOf(i, VERSION_KEYS));
+  return { product: s.product, ...(s.version !== undefined ? { version: s.version } : {}) };
+}
+function normalizeArgs(args) {
+  if (typeof args === 'string') { try { args = JSON.parse(args); } catch (_) { args = { product: args }; } }
+  if (!args || typeof args !== 'object' || Array.isArray(args)) args = Array.isArray(args) ? { items: args } : {};
+  const out = { ...args };
+  const s = splitProductVersion(firstOf(args, PRODUCT_KEYS), firstOf(args, VERSION_KEYS));
+  if (s.product !== undefined) out.product = s.product;
+  if (s.version !== undefined) out.version = s.version;
+  let items = firstOf(args, ['items', 'stack', 'products', 'components', 'packages']);
+  if (typeof items === 'string') items = items.split(/[,;\n]+/).map(x => x.trim()).filter(Boolean);
+  if (Array.isArray(items)) out.items = items.map(normalizeItem);
+  const sbom = firstOf(args, ['sbom', 'bom', 'document', 'content']);
+  if (sbom !== undefined) out.sbom = sbom;
+  return out;
+}
+const EX_PRODUCT = 'Send "product" as a slug such as "python", "nodejs", "rhel" or "windows-server" (list_products searches them)';
+const EX_VERSION = 'e.g. {"product":"python","version":"3.12"}. Without a version, get_product_lifecycle returns every version.';
+const MSG_NO_PRODUCT = `Missing "product". ${EX_PRODUCT}.`;
+const MSG_NO_ITEMS = 'Missing "items". Send a list such as [{"product":"python","version":"3.12"},{"product":"nodejs","version":"20"}] (strings like "python 3.12" also work).';
+const MSG_ITEMS_NO_PRODUCT = 'No item in "items" names a product. Each item needs "product" (and ideally "version"), e.g. {"product":"postgresql","version":"13"}.';
+const MSG_NO_SBOM = 'Missing "sbom". Send the CycloneDX or SPDX JSON document (object or string) as "sbom".';
+
 async function runTool(name, args, request, env) {
-  args = args || {};
+  args = normalizeArgs(args);
   switch (name) {
     case 'check_eol': {
       const p = slugify(args.product), v = encodeURIComponent(String(args.version || ''));
-      if (!p || !v) return toolError('Both "product" and "version" are required.');
+      if (!p && !v) return toolError(`Missing "product" and "version". ${EX_PRODUCT}, and "version" as the release line, ${EX_VERSION}`);
+      if (!p) return toolError(MSG_NO_PRODUCT);
+      if (!v) return toolError(`Missing "version" for ${args.product}. Send "version" as the release line, ${EX_VERSION}`);
       const r = await apiGet(`/v1/status/${p}/${v}`, request, env);
       if (r.status === 404) return notFound(request, env, `No data for ${args.product} ${args.version}.`, args.product);
       if (!r.ok) return toolError(upstreamMsg(r, `No data for ${args.product} ${args.version}.`));
@@ -499,7 +551,7 @@ async function runTool(name, args, request, env) {
     }
     case 'get_risk_score': {
       const p = slugify(args.product);
-      if (!p) return toolError('"product" is required.');
+      if (!p) return toolError(MSG_NO_PRODUCT);
       const path = args.version
         ? `/v1/score/${p}/${encodeURIComponent(String(args.version))}`
         : `/v1/score/${p}`;
@@ -510,12 +562,12 @@ async function runTool(name, args, request, env) {
     }
     case 'scan_stack': {
       const items = Array.isArray(args.items) ? args.items : [];
-      if (!items.length) return toolError('"items" must be a non-empty array of {product, version?}.');
+      if (!items.length) return toolError(MSG_NO_ITEMS);
       const products = items.map(i => ({
         slug: slugify(i.product),
         ...(i.version ? { version: String(i.version) } : {}),
       })).filter(i => i.slug);
-      if (!products.length) return toolError('No item in "items" has a product name.');
+      if (!products.length) return toolError(MSG_ITEMS_NO_PRODUCT);
       let r = await apiPost('/v1/batch', { products }, request, env);
       // Over the tier's batch size the API refuses the whole call (403, or 400
       // for Pro above 50). Score the first N it allows and say what was left out,
@@ -557,7 +609,7 @@ async function runTool(name, args, request, env) {
     }
     case 'get_product_lifecycle': {
       const p = slugify(args.product);
-      if (!p) return toolError('"product" is required.');
+      if (!p) return toolError(MSG_NO_PRODUCT);
       const r = await apiGet(`/v1/product/${p}`, request, env);
       if (r.status === 404) return notFound(request, env, `Product "${args.product}" not found.`, args.product);
       if (!r.ok) return toolError(upstreamMsg(r, `Product "${args.product}" not found.`));
@@ -565,7 +617,7 @@ async function runTool(name, args, request, env) {
     }
     case 'get_kev_exposure': {
       const p = slugify(args.product);
-      if (!p) return toolError('"product" is required.');
+      if (!p) return toolError(MSG_NO_PRODUCT);
       const [kev, eu] = await Promise.all([fetchStatic('/kev-products.json'), fetchStatic('/exploited-and-unpatchable.json')]);
       const rec = kev.products && kev.products[p];
       const euEntries = (Array.isArray(eu.signals) ? eu.signals : (Array.isArray(eu.entries) ? eu.entries : []))
@@ -671,7 +723,7 @@ async function runTool(name, args, request, env) {
     }
     case 'get_upgrade_path': {
       const p = slugify(args.product);
-      if (!p) return toolError('"product" is required.');
+      if (!p) return toolError(MSG_NO_PRODUCT);
       const r = await apiGet(`/v1/product/${p}`, request, env);
       if (r.status === 404) return notFound(request, env, `Product "${args.product}" not found.`, args.product);
       if (!r.ok) return toolError(upstreamMsg(r, `Product "${args.product}" not found.`));
@@ -695,7 +747,7 @@ async function runTool(name, args, request, env) {
       });
     }
     case 'check_sbom': {
-      if (args.sbom === undefined || args.sbom === null) return toolError('"sbom" is required (CycloneDX or SPDX JSON).');
+      if (args.sbom === undefined || args.sbom === null) return toolError(MSG_NO_SBOM);
       let doc = args.sbom;
       if (typeof doc === 'string') { try { doc = JSON.parse(doc); } catch { return toolError('The SBOM is not valid JSON.'); } }
       if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return toolError('The SBOM must be a JSON object.');
