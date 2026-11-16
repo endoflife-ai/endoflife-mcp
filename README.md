@@ -111,11 +111,11 @@ Offline unit tests (fetch mocked, no network): `npm test` in `mcp-server/`
 
 ```
 docker build -t endoflife-mcp mcp-server/
-docker run --rm -p 8080:8080 endoflife-mcp
+docker run --rm -p 8080:8080 -e ENDOFLIFE_API_KEY=your_key endoflife-mcp
 curl -s localhost:8080/health
 ```
 
-Endpoints are the Worker's own: `POST /` (Streamable HTTP JSON-RPC), `GET /health` (readiness), `GET /.well-known/mcp/server-card.json`. Set `ENDOFLIFE_API_KEY` (`docker run -e ENDOFLIFE_API_KEY=...`) and the server sends it as `X-API-Key` on every call that carries no key of its own. **A self-hosted server needs it from November 16, 2026 at 00:00 UTC**, when the API stops answering data requests without a key; only the hosted endpoint at mcp.endoflife.ai stays keyless. A free key is emailed at once from https://endoflife.ai/api#free-key (150 requests a day, no expiry; higher volume is on a paid key). Validated on RHEL 9 and 10 with Node 20 and 22 by `.github/workflows/rhel-validation.yml` (evidence in `docs/company/redhat-validation-evidence.md`).
+Endpoints are the Worker's own: `POST /` (Streamable HTTP JSON-RPC), `GET /health` (readiness), `GET /.well-known/mcp/server-card.json`. Set `ENDOFLIFE_API_KEY` (`docker run -e ENDOFLIFE_API_KEY=...`) and the server sends it as `X-API-Key` on every call that carries no key of its own. **A self-hosted server needs it**: the API does not answer data requests without a key, and only the hosted endpoint at mcp.endoflife.ai stays keyless. A free key is emailed at once from https://endoflife.ai/api#free-key (150 requests a day, no expiry; higher volume is on a paid key). Validated on RHEL 9 and 10 with Node 20 and 22 by `.github/workflows/rhel-validation.yml` (evidence in `docs/company/redhat-validation-evidence.md`).
 
 ## Connect from an MCP client
 
@@ -155,10 +155,9 @@ curl -s https://mcp.endoflife.ai/.well-known/mcp/server-card.json | jq
 
 The read tools work with no key for individual use and evaluation through the hosted
 endpoint mcp.endoflife.ai (each agent gets 2,000 a day and 5 per call). Calling the API
-directly, or running this server yourself, works without a key only until November 16,
-2026 at 00:00 UTC (anonymous tier: 50 requests a day, 3 components per SBOM or batch
-call); from then every data request needs a key (set `ENDOFLIFE_API_KEY` on a
-self-hosted server; free key at https://endoflife.ai/api#free-key). Agents that run inside a
+directly, or running this server yourself, needs a key for every data request (set
+`ENDOFLIFE_API_KEY` on a self-hosted server; a free key gives 150 requests a day and 5
+components per call, from https://endoflife.ai/api#free-key). Agents that run inside a
 company's tooling, check inventories or call on a schedule are production use and
 belong on a paid key: Starter ($89/month, 10,000 requests a day, 25 per call) or
 Pro ($299/month, 100,000 requests a day under fair use, 50 per call), issued at checkout from
