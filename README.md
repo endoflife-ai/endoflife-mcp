@@ -7,29 +7,9 @@ Protocol** (MCP, Streamable HTTP transport). A dependency-free Cloudflare Worker
 that wraps the public `api.endoflife.ai/v1` endpoints and the site's published
 feeds — no data duplicated, every answer carries a source URL.
 
-Current version: **1.4.4** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
-`package.json`, the `Dockerfile` `ARG VERSION`, and the site's
-`endoflife/.well-known/mcp/server-card.json` — keep them in step; the registry and
-Glama read `server.json`).
+**Use the hosted server:** `https://mcp.endoflife.ai` (Streamable HTTP, nothing to install). Client setup is under [Connect from an MCP client](#connect-from-an-mcp-client).
 
-1.4.4: check_sbom declares its sbom input as object or string (the directory portal flags an input with no type).
-
-1.4.3: scan_stack and check_sbom descriptions state the keyless per-call limit without naming plans (Claude Connectors Directory review: tool descriptions must not promote products); the limit note in answers is unchanged.
-
-1.4.2: tools accept the argument shapes clients actually send (name, slug or cycle
-for product and version, "python 3.12" as one string, arguments as a JSON string,
-scan_stack items as strings or a comma list), and a missing argument gets an error
-that says what to send, with an example.
-
-1.4.1: description and tool text carry the current build-computed counts
-(700+ products, 15,000+ versions) for the registry and npm listings; no behaviour change.
-
-1.4.0: `check_sbom` is a thin proxy to the API's `POST /v1/sbom` (one resolver for
-every surface; versions keep their release family, e.g. python 3.12, ubuntu 20.04).
-Above the tier cap it returns the scored subset plus `limit_note` and
-`not_scored_count`; `scan_stack` scores the first N the tier allows and lists the rest
-in `not_checked`. Until 1.4.0 check_sbom cut every version to its major number and a
-keyless SBOM with more than 5 matched components returned nothing.
+Useful? A star helps other teams find it.
 
 ## Tools (all read-only)
 
@@ -163,6 +143,32 @@ belong on a paid key: Starter ($89/month, 10,000 requests a day, 25 per call) or
 Pro ($299/month, 100,000 requests a day under fair use, 50 per call), issued at checkout from
 https://endoflife.ai/api?utm_source=mcp#get-key. Forward it as an `X-API-Key`
 header; the Worker passes it straight through to `api.endoflife.ai`.
+
+## Version notes
+
+Current version: **1.4.4** (`SERVER_INFO.version` in `src/index.js`, `server.json`,
+`package.json`, the `Dockerfile` `ARG VERSION`, and the site's
+`endoflife/.well-known/mcp/server-card.json` — keep them in step; the registry and
+Glama read `server.json`).
+
+1.4.4: check_sbom declares its sbom input as object or string (the directory portal flags an input with no type).
+
+1.4.3: scan_stack and check_sbom descriptions state the keyless per-call limit without naming plans (Claude Connectors Directory review: tool descriptions must not promote products); the limit note in answers is unchanged.
+
+1.4.2: tools accept the argument shapes clients actually send (name, slug or cycle
+for product and version, "python 3.12" as one string, arguments as a JSON string,
+scan_stack items as strings or a comma list), and a missing argument gets an error
+that says what to send, with an example.
+
+1.4.1: description and tool text carry the current build-computed counts
+(700+ products, 15,000+ versions) for the registry and npm listings; no behaviour change.
+
+1.4.0: `check_sbom` is a thin proxy to the API's `POST /v1/sbom` (one resolver for
+every surface; versions keep their release family, e.g. python 3.12, ubuntu 20.04).
+Above the tier cap it returns the scored subset plus `limit_note` and
+`not_scored_count`; `scan_stack` scores the first N the tier allows and lists the rest
+in `not_checked`. Until 1.4.0 check_sbom cut every version to its major number and a
+keyless SBOM with more than 5 matched components returned nothing.
 
 ## Notes
 
